@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { GeneratePageClient } from '@/components/generate/GeneratePageClient';
 
 export const metadata: Metadata = {
@@ -16,14 +17,14 @@ export default function HomePage() {
         role="banner"
       >
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
-          <a
+          <Link
             href="/"
             className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100
                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
             aria-label="Glitrai home"
           >
             glitrai
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
             <span
               className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
