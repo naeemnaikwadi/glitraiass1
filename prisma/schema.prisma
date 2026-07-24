@@ -1,0 +1,47 @@
+// Prisma Schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+  // "wasm" is required when using @prisma/adapter-neon on serverless platforms
+  // (Vercel, Netlify). It avoids shipping a native .node binary which won't
+  // work in serverless function environments.
+  engineType      = "wasm"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+
+enum JobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+// ============================================================
+// Models
+// ============================================================
+
+model Job {
+  id               String    @id @default(cuid())
+  productName      String
+  description      String
+  referenceImage   String
+  generatedPrompt  String?
+  generatedImage   String?
+  status           JobStatus @default(pending)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("jobs")
+}

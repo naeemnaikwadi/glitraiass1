@@ -1,0 +1,19 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "prisma migrate deploy && next build",
+  "installCommand": "npm install",
+  "functions": {
+    "app/api/generate/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/jobs/route.ts": {
+      "maxDuration": 15
+    },
+    "app/api/jobs/[id]/route.ts": {
+      "maxDuration": 15
+    },
+    "app/api/health/route.ts": {
+      "maxDuration": 10
+    }
+  }
+}
