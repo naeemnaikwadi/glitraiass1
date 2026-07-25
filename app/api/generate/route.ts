@@ -1,4 +1,4 @@
-import { type NextRequest, after } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { apiSuccess, apiError, withHandler, type RouteContext } from '@/lib/api-response';
 import { parseGenerateJobBody } from '@/lib/validation/job.validation';
 import { initiateGenerateJob } from '@/lib/services/job.service';
@@ -73,10 +73,6 @@ export const POST = withHandler(async (req: NextRequest, _ctx: RouteContext) => 
 
   const job = await initiateGenerateJob({ productName, description, referenceImage });
   logger.info('Job created', 'POST /api/generate', { jobId: job.id });
-
-  after(() => {
-    logger.debug('after() — pipeline running', 'POST /api/generate', { jobId: job.id });
-  });
 
   return apiSuccess(job, 'Job created successfully', 201);
 });

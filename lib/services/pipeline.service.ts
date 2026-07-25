@@ -22,6 +22,14 @@ export async function runGenerationPipeline(jobId: string): Promise<void> {
 
   // ── Step 1: mark as processing ────────────────────────────────────────────
   try {
+    const current = await findJobByIdOrThrow(jobId);
+
+    // Idempotency: skip if already past pending (handles duplicate calls)
+    if (current.status === 'processing' || current.status === 'completed' || current.status === 'failed') {
+      logger.info(`Pipeline skipped — job already in status "${current.status}"`, CTX, { jobId });
+      return;
+    }
+
     await updateJob(jobId, { status: 'processing' });
   } catch (err) {
     logger.error(
@@ -36,7 +44,6 @@ export async function runGenerationPipeline(jobId: string): Promise<void> {
   try {
     // ── Step 2: load job ──────────────────────────────────────────────────
     const job = await findJobByIdOrThrow(jobId);
-
     // ── Step 3: generate prompt (Gemini → fallback) ───────────────────────
     logger.info('Generating prompt', CTX, { jobId });
 

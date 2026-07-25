@@ -19,17 +19,15 @@ export function JobList({ latestJobId, onJobsChange }: Props) {
 
   // ── Merge a polled update into the list ───────────────────────────────────
   const mergeJob = useCallback((updated: JobCardData) => {
-    setJobs((prev) => {
-      const next = prev.map((j) => (j.id === updated.id ? { ...j, ...updated } : j));
-      onJobsChange?.(next);
-      return next;
-    });
+    // Compute next state outside the setter so we can notify the parent
+    // without calling setState inside another component's render phase.
+    setJobs((prev) => prev.map((j) => (j.id === updated.id ? { ...j, ...updated } : j)));
     if (updated.status === 'completed') {
       toast(`"${updated.productName}" — image ready!`, 'success');
     } else if (updated.status === 'failed') {
       toast(`"${updated.productName}" — generation failed`, 'error');
     }
-  }, [toast, onJobsChange]);
+  }, [toast]);
 
   // ── Load full list ────────────────────────────────────────────────────────
   const loadJobs = useCallback(async () => {
@@ -38,7 +36,6 @@ export function JobList({ latestJobId, onJobsChange }: Props) {
       const json = await res.json();
       if (json.success) {
         setJobs(json.data as JobCardData[]);
-        onJobsChange?.(json.data as JobCardData[]);
         setError(null);
       } else {
         setError(json.error ?? 'Failed to load jobs');
@@ -48,13 +45,19 @@ export function JobList({ latestJobId, onJobsChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [onJobsChange]);
+  }, []);
 
   useEffect(() => { loadJobs(); }, [loadJobs]);
 
   useEffect(() => {
     if (latestJobId) loadJobs();
   }, [latestJobId, loadJobs]);
+
+  // Notify parent whenever the jobs list changes (stats, etc.)
+  // Using an effect keeps this outside the render phase.
+  useEffect(() => {
+    onJobsChange?.(jobs);
+  }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeJobs = jobs.filter(
     (j) => j.status === 'pending' || j.status === 'processing',

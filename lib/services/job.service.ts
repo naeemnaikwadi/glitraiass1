@@ -4,7 +4,6 @@
  */
 
 import { createJob, findAllJobs, findJobByIdOrThrow } from '@/lib/repositories/job.repository';
-import { runGenerationPipeline } from '@/lib/services/pipeline.service';
 import { logger } from '@/lib/logger';
 import type { GenerateJobBody } from '@/lib/validation/job.validation';
 import type { Job } from '@/types/job';
@@ -14,18 +13,15 @@ const CTX = 'JobService';
 // ─── Operations ───────────────────────────────────────────────────────────────
 
 /**
- * Create a job (DB write only) and fire the async pipeline.
- * Returns immediately — does NOT block on generation.
+ * Create a job (DB write only) and return immediately.
+ * The caller is responsible for triggering the pipeline via POST /api/process/:id.
  */
 export async function initiateGenerateJob(
   input: GenerateJobBody,
 ): Promise<Pick<Job, 'id' | 'status' | 'createdAt'>> {
   const job = await createJob(input);
 
-  logger.info(`Job created, pipeline starting`, CTX, { jobId: job.id });
-
-  // Fire-and-forget — pipeline handles its own errors internally
-  runGenerationPipeline(job.id);
+  logger.info(`Job created`, CTX, { jobId: job.id });
 
   return { id: job.id, status: job.status, createdAt: job.createdAt };
 }

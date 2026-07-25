@@ -102,7 +102,16 @@ export function GenerateForm({ onJobCreated }: Props) {
       setUploadFile(null);
       setErrors({});
       toast('Job created — generation started!', 'success');
-      onJobCreated(json.data.id);
+
+      const jobId = json.data.id;
+
+      // Trigger the pipeline on the server (required for Vercel serverless
+      // reliability — do not await so polling can start immediately).
+      fetch(`/api/process/${jobId}`, { method: 'POST' }).catch(() => {
+        // Non-fatal: polling will reflect the actual job status regardless
+      });
+
+      onJobCreated(jobId);
     } catch {
       toast('Network error. Check your connection.', 'error');
     } finally {
