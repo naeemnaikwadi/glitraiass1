@@ -4,6 +4,11 @@
  * Primary:  Gemini 2.0 Flash — with retry + exponential backoff.
  * Fallback: Local template — used if Gemini is unavailable for any reason.
  *
+ * Retry policy:
+ *   - 429 (quota exceeded) → immediate fallback, no retry (no point waiting)
+ *   - 500 / 502 / 503 / 504 / network timeout → retry with exponential backoff
+ *   - anything else → immediate fallback, no retry
+ *
  * The service never throws due to Gemini being unavailable.
  * It only throws if the fallback itself errors (should never happen).
  */
@@ -14,7 +19,7 @@ import { logger } from '@/lib/logger';
 
 const CTX = 'PromptService';
 const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 2000; // 2 s, doubles each retry
+const BASE_DELAY_MS = 2000; // 2 s, doubles each retry: 2 s → 4 s → 8 s
 
 export interface PromptGeneratorInput {
   productName: string;
@@ -37,11 +42,34 @@ function getClient(): GoogleGenerativeAI {
   return _client;
 }
 
-// ─── Retry helper ─────────────────────────────────────────────────────────────
+// ─── Retry classification ─────────────────────────────────────────────────────
 
-function isRetryable(err: unknown): boolean {
+/**
+ * 429 = quota exceeded — no retry, go straight to fallback.
+ * Retrying a quota error just wastes time burning through the timeout budget.
+ */
+function isQuotaExceeded(err: unknown): boolean {
   const msg = String(err);
-  return msg.includes('429') || msg.includes('503') || msg.includes('500');
+  return msg.includes('429') || msg.toLowerCase().includes('quota');
+}
+
+/**
+ * Transient server/network errors worth retrying:
+ * 500 Internal Server Error, 502 Bad Gateway,
+ * 503 Service Unavailable, 504 Gateway Timeout,
+ * or a network-level failure (fetch threw without an HTTP status).
+ */
+function isTransient(err: unknown): boolean {
+  const msg = String(err);
+  return (
+    msg.includes('500') ||
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('504') ||
+    msg.toLowerCase().includes('network') ||
+    msg.toLowerCase().includes('timeout') ||
+    msg.toLowerCase().includes('fetch failed')
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -69,6 +97,11 @@ export function generateFallbackPrompt(productName: string, description: string)
 
 // ─── Gemini generation ────────────────────────────────────────────────────────
 
+/**
+ * Attempts to generate a prompt via Gemini with retry on transient errors.
+ * Throws immediately on 429 (quota) so the caller can skip to fallback fast.
+ * Throws after all retries are exhausted on transient errors.
+ */
 async function generateWithGemini(input: PromptGeneratorInput): Promise<string> {
   const { productName, description } = input;
 
@@ -100,19 +133,30 @@ async function generateWithGemini(input: PromptGeneratorInput): Promise<string> 
       return text;
     } catch (err) {
       lastErr = err;
-      const retryable = isRetryable(err);
 
-      if (retryable && attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY_MS * 2 ** (attempt - 1); // 2s → 4s → 8s
-        logger.warn(`Gemini attempt ${attempt}/${MAX_RETRIES} failed. Retrying.`, CTX, { attempt, delay });
-        await sleep(delay);
-      } else {
+      // ── 429: quota exceeded — bail out immediately, no retry ─────────────
+      if (isQuotaExceeded(err)) {
+        logger.warn('Gemini quota exceeded (429). Skipping retries.', CTX);
         break;
       }
+
+      // ── Transient error — retry with exponential backoff ─────────────────
+      if (isTransient(err) && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * 2 ** (attempt - 1); // 2 s → 4 s → 8 s
+        logger.warn(
+          `Gemini attempt ${attempt}/${MAX_RETRIES} failed (transient). Retrying in ${delay}ms.`,
+          CTX,
+          { attempt, delay },
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      // ── Non-retryable error (4xx other than 429, bad response, etc.) ─────
+      break;
     }
   }
 
-  // Surface a clean error message — no raw API response, no stack trace
   const reason = lastErr instanceof Error ? lastErr.message : String(lastErr);
   throw new Error(reason);
 }
@@ -122,9 +166,8 @@ async function generateWithGemini(input: PromptGeneratorInput): Promise<string> 
 /**
  * Generates an image prompt.
  *
- * Tries Gemini first. If Gemini fails for any reason (quota, network, invalid
- * key, timeout, empty response), logs a concise warning and returns a
- * locally-generated fallback prompt instead.
+ * Tries Gemini first with the retry policy above.
+ * Falls back to a local deterministic template on any failure.
  *
  * Never throws due to Gemini being unavailable.
  */

@@ -6,8 +6,6 @@
  *
  * The job is NEVER marked failed due to Gemini being unavailable.
  * It is only marked failed if image generation itself fails.
- *
- * Fire-and-forget — never throws. All errors are caught and written to DB.
  */
 
 import { findJobByIdOrThrow, updateJob } from '@/lib/repositories/job.repository';
@@ -17,7 +15,16 @@ import { logger } from '@/lib/logger';
 
 const CTX = 'Pipeline';
 
+// ─── Timing helper ────────────────────────────────────────────────────────────
+
+function elapsed(start: number): string {
+  return `${(performance.now() - start).toFixed(0)}ms`;
+}
+
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
+
 export async function runGenerationPipeline(jobId: string): Promise<void> {
+  const pipelineStart = performance.now();
   logger.info('Pipeline started', CTX, { jobId });
 
   // ── Step 1: mark as processing ────────────────────────────────────────────
@@ -44,13 +51,17 @@ export async function runGenerationPipeline(jobId: string): Promise<void> {
   try {
     // ── Step 2: load job ──────────────────────────────────────────────────
     const job = await findJobByIdOrThrow(jobId);
+
     // ── Step 3: generate prompt (Gemini → fallback) ───────────────────────
     logger.info('Generating prompt', CTX, { jobId });
+    const promptStart = performance.now();
 
     const { prompt: generatedPrompt, usedFallback } = await generatePrompt({
       productName: job.productName,
       description: job.description,
     });
+
+    logger.info(`Prompt generated in ${elapsed(promptStart)}`, CTX, { jobId });
 
     if (usedFallback) {
       logger.warn('Gemini unavailable. Using fallback prompt.', CTX, { jobId });
@@ -58,17 +69,21 @@ export async function runGenerationPipeline(jobId: string): Promise<void> {
 
     // ── Step 4: generate image ────────────────────────────────────────────
     logger.info('Generating image', CTX, { jobId });
+    const imageStart = performance.now();
 
     const generatedImage = await generateImage({
       prompt: generatedPrompt,
       referenceImage: job.referenceImage,
     });
 
-    logger.info('Image generated successfully', CTX, { jobId });
+    logger.info(`Image generated in ${elapsed(imageStart)}`, CTX, { jobId });
 
     // ── Step 5: complete ──────────────────────────────────────────────────
+    const dbStart = performance.now();
     await updateJob(jobId, { status: 'completed', generatedPrompt, generatedImage });
-    logger.info('Job completed', CTX, { jobId });
+    logger.info(`Database updated in ${elapsed(dbStart)}`, CTX, { jobId });
+
+    logger.info(`Job completed — total ${elapsed(pipelineStart)}`, CTX, { jobId });
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -84,5 +99,7 @@ export async function runGenerationPipeline(jobId: string): Promise<void> {
         { jobId },
       );
     }
+
+    logger.info(`Job failed — total ${elapsed(pipelineStart)}`, CTX, { jobId });
   }
 }
